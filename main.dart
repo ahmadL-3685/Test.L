@@ -14,8 +14,18 @@ const Map<String, Map<String, String>> _t = {
     'add_exam': 'ثبت آزمون جدید',
     'edit_exam': 'ویرایش آزمون',
     'subject': 'درس',
-    'score': 'نمره',
-    'max_score': 'نمره کل',
+    'total_q': 'تعداد کل سوال‌ها',
+    'correct': 'درست',
+    'wrong': 'غلط',
+    'blank': 'نزده',
+    'penalty': 'نمره منفی',
+    'penalty_none': 'بدون منفی',
+    'penalty_third': 'منفی ۱/۳',
+    'penalty_quarter': 'منفی ۱/۴',
+    'penalty_hint': 'با منفی ۱/۳ هر ۳ غلط، یک درست رو از بین می‌بره.',
+    'result': 'درصد تو',
+    'bad_count': 'مجموع درست و غلط از کل سوال‌ها بیشتره',
+    'default_penalty': 'نمره منفی پیش‌فرض',
     'date': 'تاریخ',
     'note': 'یادداشت (اختیاری)',
     'save': 'ذخیره',
@@ -48,8 +58,18 @@ const Map<String, Map<String, String>> _t = {
     'add_exam': 'Add new exam',
     'edit_exam': 'Edit exam',
     'subject': 'Subject',
-    'score': 'Score',
-    'max_score': 'Max score',
+    'total_q': 'Total questions',
+    'correct': 'Correct',
+    'wrong': 'Wrong',
+    'blank': 'Blank',
+    'penalty': 'Negative marking',
+    'penalty_none': 'None',
+    'penalty_third': 'Negative 1/3',
+    'penalty_quarter': 'Negative 1/4',
+    'penalty_hint': 'Each wrong answer removes a fraction of one correct answer (1/3 means 3 wrong cancel 1 correct).',
+    'result': 'Your percentage',
+    'bad_count': 'Correct + wrong is more than total questions',
+    'default_penalty': 'Default negative marking',
     'date': 'Date',
     'note': 'Note (optional)',
     'save': 'Save',
@@ -112,6 +132,10 @@ String fmtNum(double v) {
   return s;
 }
 
+const double kThird = 1 / 3;
+
+String fmtPct(double p) => '${fmtNum((p * 10).round() / 10)}%';
+
 String two(int n) => n.toString().padLeft(2, '0');
 String fmtDate(DateTime d) => '${d.year}/${two(d.month)}/${two(d.day)}';
 String fmtShort(DateTime d) => '${two(d.month)}/${two(d.day)}';
@@ -121,27 +145,36 @@ String fmtShort(DateTime d) => '${two(d.month)}/${two(d.day)}';
 class Exam {
   final String id;
   final String subject;
-  final double score;
-  final double maxScore;
+  final int total;
+  final int correct;
+  final int wrong;
+  final double penalty;
   final DateTime date;
   final String note;
 
   Exam({
     required this.id,
     required this.subject,
-    required this.score,
-    required this.maxScore,
+    required this.total,
+    required this.correct,
+    required this.wrong,
+    required this.penalty,
     required this.date,
     this.note = '',
   });
 
-  double get percent => maxScore <= 0 ? 0 : score / maxScore * 100;
+  int get blank => total - correct - wrong;
+
+  double get percent =>
+      total <= 0 ? 0 : (correct - wrong * penalty) / total * 100;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'subject': subject,
-        'score': score,
-        'maxScore': maxScore,
+        'total': total,
+        'correct': correct,
+        'wrong': wrong,
+        'penalty': penalty,
         'date': date.toIso8601String(),
         'note': note,
       };
@@ -149,8 +182,10 @@ class Exam {
   factory Exam.fromJson(Map<String, dynamic> j) => Exam(
         id: j['id'] as String,
         subject: j['subject'] as String,
-        score: (j['score'] as num).toDouble(),
-        maxScore: (j['maxScore'] as num).toDouble(),
+        total: (j['total'] as num).toInt(),
+        correct: (j['correct'] as num).toInt(),
+        wrong: (j['wrong'] as num).toInt(),
+        penalty: (j['penalty'] as num).toDouble(),
         date: DateTime.parse(j['date'] as String),
         note: (j['note'] as String?) ?? '',
       );
@@ -163,10 +198,12 @@ class Store extends ChangeNotifier {
   List<Exam> exams = [];
   String lang;
   bool dark;
+  double penalty;
 
   Store(this.prefs)
       : lang = prefs.getString('lang') ?? 'fa',
-        dark = prefs.getBool('dark') ?? false {
+        dark = prefs.getBool('dark') ?? false,
+        penalty = prefs.getDouble('penalty') ?? kThird {
     final raw = prefs.getString('exams');
     if (raw != null) {
       try {
@@ -231,6 +268,12 @@ class Store extends ChangeNotifier {
   void setDark(bool v) {
     dark = v;
     prefs.setBool('dark', v);
+    notifyListeners();
+  }
+
+  void setPenalty(double v) {
+    penalty = v;
+    prefs.setDouble('penalty', v);
     notifyListeners();
   }
 }
@@ -428,10 +471,10 @@ class ExamsTab extends StatelessWidget {
                 value: nd(context, '${list.length}')),
             StatBox(
                 label: t(context, 'average'),
-                value: nd(context, '${averagePercent(list).round()}%')),
+                value: nd(context, fmtPct(averagePercent(list)))),
             StatBox(
                 label: t(context, 'best'),
-                value: nd(context, '${best.round()}%')),
+                value: nd(context, fmtPct(best))),
           ],
         ),
         const SizedBox(height: 8),
@@ -453,6 +496,11 @@ class ExamTile extends StatelessWidget {
       nd(context, fmtDate(exam.date)),
       if (exam.note.isNotEmpty) exam.note,
     ].join('  •  ');
+    final counts = nd(
+        context,
+        '${t(context, 'correct')}: ${exam.correct}   '
+        '${t(context, 'wrong')}: ${exam.wrong}   '
+        '${t(context, 'blank')}: ${exam.blank}');
     return Dismissible(
       key: ValueKey(exam.id),
       direction: DismissDirection.horizontal,
@@ -497,21 +545,17 @@ class ExamTile extends StatelessWidget {
           ),
           title: Text(exam.subject,
               style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                nd(context,
-                    '${fmtNum(exam.score)} / ${fmtNum(exam.maxScore)}'),
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              Text(
-                nd(context, '${exam.percent.round()}%'),
-                style: TextStyle(color: color, fontWeight: FontWeight.bold),
-              ),
+              Text(counts),
+              Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis),
             ],
+          ),
+          trailing: Text(
+            nd(context, fmtPct(exam.percent)),
+            style: TextStyle(
+                color: color, fontWeight: FontWeight.bold, fontSize: 18),
           ),
         ),
       ),
@@ -520,6 +564,31 @@ class ExamTile extends StatelessWidget {
 }
 
 // ───────────────────────── Add / edit form ─────────────────────────
+
+class PenaltyChips extends StatelessWidget {
+  final double value;
+  final ValueChanged<double> onChanged;
+  const PenaltyChips({super.key, required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final opts = <MapEntry<String, double>>[
+      const MapEntry('penalty_none', 0.0),
+      const MapEntry('penalty_third', kThird),
+      const MapEntry('penalty_quarter', 0.25),
+    ];
+    return Wrap(
+      spacing: 8,
+      children: opts
+          .map((o) => ChoiceChip(
+                label: Text(t(context, o.key)),
+                selected: (value - o.value).abs() < 1e-9,
+                onSelected: (_) => onChanged(o.value),
+              ))
+          .toList(),
+    );
+  }
+}
 
 class ExamFormPage extends StatefulWidget {
   final Exam? exam;
@@ -531,18 +600,21 @@ class ExamFormPage extends StatefulWidget {
 class _ExamFormPageState extends State<ExamFormPage> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _subject;
-  late final TextEditingController _score;
-  late final TextEditingController _max;
+  late final TextEditingController _total;
+  late final TextEditingController _correct;
+  late final TextEditingController _wrong;
   late final TextEditingController _note;
   late DateTime _date;
+  double? _penalty;
 
   @override
   void initState() {
     super.initState();
     final e = widget.exam;
     _subject = TextEditingController(text: e?.subject ?? '');
-    _score = TextEditingController(text: e == null ? '' : fmtNum(e.score));
-    _max = TextEditingController(text: e == null ? '20' : fmtNum(e.maxScore));
+    _total = TextEditingController(text: e == null ? '' : '${e.total}');
+    _correct = TextEditingController(text: e == null ? '' : '${e.correct}');
+    _wrong = TextEditingController(text: e == null ? '' : '${e.wrong}');
     _note = TextEditingController(text: e?.note ?? '');
     _date = e?.date ?? DateTime.now();
   }
@@ -550,10 +622,18 @@ class _ExamFormPageState extends State<ExamFormPage> {
   @override
   void dispose() {
     _subject.dispose();
-    _score.dispose();
-    _max.dispose();
+    _total.dispose();
+    _correct.dispose();
+    _wrong.dispose();
     _note.dispose();
     super.dispose();
+  }
+
+  int? _int(TextEditingController c, {bool emptyZero = false}) {
+    if (c.text.trim().isEmpty) return emptyZero ? 0 : null;
+    final n = parseNum(c.text);
+    if (n == null || n < 0 || n != n.roundToDouble()) return null;
+    return n.toInt();
   }
 
   Future<void> _pickDate() async {
@@ -566,25 +646,45 @@ class _ExamFormPageState extends State<ExamFormPage> {
     if (d != null) setState(() => _date = d);
   }
 
-  void _save() {
+  void _save(double penalty) {
     if (!_form.currentState!.validate()) return;
     final s = StoreScope.of(context);
     s.addOrUpdate(Exam(
       id: widget.exam?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
       subject: _subject.text.trim(),
-      score: parseNum(_score.text)!,
-      maxScore: parseNum(_max.text)!,
+      total: _int(_total)!,
+      correct: _int(_correct, emptyZero: true)!,
+      wrong: _int(_wrong, emptyZero: true)!,
+      penalty: penalty,
       date: _date,
       note: _note.text.trim(),
     ));
     Navigator.pop(context);
   }
 
+  String? _countCheck() {
+    final total = _int(_total);
+    final c = _int(_correct, emptyZero: true);
+    final w = _int(_wrong, emptyZero: true);
+    if (c == null || w == null) return t(context, 'invalid');
+    if (total != null && c + w > total) return t(context, 'bad_count');
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = StoreScope.of(context);
     final subjects = s.subjects;
-    const numKb = TextInputType.numberWithOptions(decimal: true);
+    final pen = _penalty ?? widget.exam?.penalty ?? s.penalty;
+    const numKb = TextInputType.number;
+
+    final total = _int(_total) ?? 0;
+    final c = _int(_correct, emptyZero: true) ?? 0;
+    final w = _int(_wrong, emptyZero: true) ?? 0;
+    final valid = total > 0 && c + w <= total;
+    final pct = valid ? (c - w * pen) / total * 100 : 0.0;
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(t(context,
@@ -620,52 +720,95 @@ class _ExamFormPageState extends State<ExamFormPage> {
                 ),
               ],
               const SizedBox(height: 16),
+              TextFormField(
+                controller: _total,
+                keyboardType: numKb,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: t(context, 'total_q'),
+                  border: const OutlineInputBorder(),
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return t(context, 'required');
+                  }
+                  final n = _int(_total);
+                  if (n == null || n <= 0) return t(context, 'invalid');
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: TextFormField(
-                      controller: _score,
+                      controller: _correct,
                       keyboardType: numKb,
+                      onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
-                        labelText: t(context, 'score'),
+                        labelText: t(context, 'correct'),
                         border: const OutlineInputBorder(),
                       ),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) {
-                          return t(context, 'required');
-                        }
-                        final n = parseNum(v);
-                        if (n == null || n < 0) return t(context, 'invalid');
-                        final m = parseNum(_max.text);
-                        if (m != null && n > m) {
-                          return t(context, 'score_gt_max');
-                        }
-                        return null;
-                      },
+                      validator: (_) => _countCheck(),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextFormField(
-                      controller: _max,
+                      controller: _wrong,
                       keyboardType: numKb,
+                      onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
-                        labelText: t(context, 'max_score'),
+                        labelText: t(context, 'wrong'),
                         border: const OutlineInputBorder(),
                       ),
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) {
-                          return t(context, 'required');
-                        }
-                        final n = parseNum(v);
-                        if (n == null || n <= 0) return t(context, 'invalid');
-                        return null;
-                      },
+                      validator: (_) => _countCheck(),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              Text(t(context, 'penalty'),
+                  style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              PenaltyChips(
+                value: pen,
+                onChanged: (v) => setState(() => _penalty = v),
+              ),
+              const SizedBox(height: 6),
+              Text(t(context, 'penalty_hint'),
+                  style: Theme.of(context).textTheme.bodySmall),
+              if (valid) ...[
+                const SizedBox(height: 16),
+                Card(
+                  color: cs.primaryContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        Text(t(context, 'result'),
+                            style: TextStyle(color: cs.onPrimaryContainer)),
+                        const SizedBox(height: 4),
+                        Text(
+                          nd(context, fmtPct(pct)),
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: cs.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          nd(context,
+                              '${t(context, 'blank')}: ${total - c - w}'),
+                          style: TextStyle(color: cs.onPrimaryContainer),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: _pickDate,
@@ -679,7 +822,7 @@ class _ExamFormPageState extends State<ExamFormPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _note,
-                maxLines: 3,
+                maxLines: 2,
                 decoration: InputDecoration(
                   labelText: t(context, 'note'),
                   border: const OutlineInputBorder(),
@@ -687,7 +830,7 @@ class _ExamFormPageState extends State<ExamFormPage> {
               ),
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: _save,
+                onPressed: () => _save(pen),
                 icon: const Icon(Icons.check),
                 label: Text(t(context, 'save')),
                 style: FilledButton.styleFrom(
@@ -777,13 +920,13 @@ class _ProgressTabState extends State<ProgressTab> {
             StatBox(
                 label: t(context, 'average'),
                 value:
-                    nd(context, '${averagePercent(list).round()}%')),
+                    nd(context, fmtPct(averagePercent(list)))),
             StatBox(
                 label: t(context, 'best'),
-                value: nd(context, '${best.round()}%')),
+                value: nd(context, fmtPct(best))),
             StatBox(
                 label: t(context, 'last'),
-                value: nd(context, '${last.round()}%')),
+                value: nd(context, fmtPct(last))),
           ],
         ),
         const SizedBox(height: 8),
@@ -950,6 +1093,13 @@ class SettingsTab extends StatelessWidget {
           value: s.dark,
           onChanged: s.setDark,
         ),
+        const Divider(),
+        const SizedBox(height: 8),
+        Text(t(context, 'default_penalty'),
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        PenaltyChips(value: s.penalty, onChanged: s.setPenalty),
+        const SizedBox(height: 8),
         const Divider(),
         ListTile(
           contentPadding: EdgeInsets.zero,
