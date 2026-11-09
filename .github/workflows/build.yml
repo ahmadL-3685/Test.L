@@ -33,7 +33,17 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build apk --release
+      - name: Build APK (retries if GitHub downloads fail)
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "=== Attempt $i ==="
+            if flutter build apk --release; then
+              exit 0
+            fi
+            echo "Build failed, waiting before retry..."
+            sleep $((i * 30))
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
