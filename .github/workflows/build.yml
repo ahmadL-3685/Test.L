@@ -1,0 +1,41 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Android project around my files
+        run: |
+          mkdir -p /tmp/src
+          cp main.dart pubspec.yaml /tmp/src/
+          flutter create --platforms=android --project-name testino --org com.testino.app .
+          cp /tmp/src/pubspec.yaml pubspec.yaml
+          mkdir -p lib
+          cp /tmp/src/main.dart lib/main.dart
+          sed -i 's/android:label="[^"]*"/android:label="Testino"/' android/app/src/main/AndroidManifest.xml
+
+      - run: flutter pub get
+
+      - run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testino-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
